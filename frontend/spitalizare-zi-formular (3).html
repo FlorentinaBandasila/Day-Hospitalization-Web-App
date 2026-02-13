@@ -1,0 +1,2661 @@
+<!DOCTYPE html>
+<html lang="ro">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spitalizare de Zi - Formular</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="mockSpitalizari.js"></script>
+    <script src="rodata.js"></script>
+    <script src="api.js"></script>
+    <script>
+        // Preluare și structurare date județe și localități din window.roData
+        window.judetLocalitati = {};
+        window.judeteShort = [];
+        (function () {
+            const data = window.roData || [];
+            const judetMap = {};
+            const judetShortMap = {
+                'Alba': 'AB', 'Arad': 'AR', 'Argeş': 'AG', 'Bacău': 'BC', 'Bihor': 'BH', 'Bistriţa-Năsăud': 'BN', 'Botoşani': 'BT',
+                'Braşov': 'BV', 'Brăila': 'BR', 'Bucureşti': 'B', 'Buzău': 'BZ', 'Caraş-Severin': 'CS', 'Călăraşi': 'CL',
+                'Cluj': 'CJ', 'Constanţa': 'CT', 'Covasna': 'CV', 'Dâmboviţa': 'DB', 'Dolj': 'DJ', 'Galaţi': 'GL',
+                'Giurgiu': 'GR', 'Gorj': 'GJ', 'Harghita': 'HR', 'Hunedoara': 'HD', 'Ialomiţa': 'IL', 'Iaşi': 'IS',
+                'Ilfov': 'IF', 'Maramureş': 'MM', 'Mehedinţi': 'MH', 'Mureş': 'MS', 'Neamţ': 'NT', 'Olt': 'OT',
+                'Prahova': 'PH', 'Satu Mare': 'SM', 'Sălaj': 'SJ', 'Sibiu': 'SB', 'Suceava': 'SV', 'Teleorman': 'TR',
+                'Timiş': 'TM', 'Tulcea': 'TL', 'Vâlcea': 'VL', 'Vaslui': 'VS', 'Vrancea': 'VN'
+            };
+            data.forEach(row => {
+                const judet = row.admin_name;
+                const short = judetShortMap[judet];
+                if (!short) return;
+                if (!judetMap[short]) judetMap[short] = new Set();
+                judetMap[short].add(row.city);
+            });
+            window.judetLocalitati = {};
+            Object.entries(judetMap).forEach(([short, locSet]) => {
+                window.judetLocalitati[short] = Array.from(locSet).sort();
+            });
+            window.judeteShort = Object.keys(window.judetLocalitati).sort();
+        })();
+    </script>
+    <link rel="stylesheet" href="spitalizare-zi-formular.css">
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            // State pentru spitalizări
+            const [spitalizari, setSpitalizari] = useState([]);
+            const [loadingSpitalizari, setLoadingSpitalizari] = useState(false);
+            const [spitalizariError, setSpitalizariError] = useState(null);
+            // Debug: log currentView
+            console.log('currentView', currentView);
+            // DEFINIREA TUTUROR STATE-URILOR LA ÎNCEPUT
+            const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'list', 'form', 'details', 'patients'
+            const [currentStep, setCurrentStep] = useState(0);
+            const [selectedRecord, setSelectedRecord] = useState(null);
+            const [previousView, setPreviousView] = useState(null);
+            const [activeMenu, setActiveMenu] = useState('dashboard');
+            const [patients, setPatients] = useState([]);
+            const [loadingPatients, setLoadingPatients] = useState(false);
+            const [patientsError, setPatientsError] = useState(null);
+            const lineChartRef = useRef(null);
+            const pieChartRef = useRef(null);
+            const barChartRef = useRef(null);
+            const doughnutChartRef = useRef(null);
+            const lineChartInstance = useRef(null);
+            const pieChartInstance = useRef(null);
+            const barChartInstance = useRef(null);
+            const doughnutChartInstance = useRef(null);
+
+            const [formData, setFormData] = useState({
+                // Date administrative
+                judet: '',
+                localitate: '',
+                spital: '',
+                sectie: '',
+                // Adaugare Pacient fields
+                nume: '',
+                prenume: '',
+                cnp: '',
+                sex: '',
+                varsta: '',
+                dataNasterii: '',
+                // Date pacient / Personal details
+                grupSanguin: '',
+                rh: '',
+                alergicLa: '',
+                domiciliuJudet: '',
+                domiciliuLocalitate: '',
+                domiciliuMediu: '',
+                domiciliuStrada: '',
+                domiciliuNumar: '',
+                resedintaSameDomiciliu: false,
+                resedintaJudet: '',
+                resedintaLocalitate: '',
+                resedintaMediu: '',
+                resedintaStrada: '',
+                resedintaNumar: '',
+                // Detalii personale
+                cetatenie: '',
+                ocupatia: '',
+                locDeMunca: '',
+                nivelInstruire: '',
+                statutAsigurat: '',
+                categorieAsigurat: '',
+                nrRegistru: '',
+                tipServicii: '',
+                diagnosticPrincipal: '',
+                codICD: '',
+                // Arrays for investigations
+                diagnosticeSecundare: [''],
+                explorariFunctionale: [{ denumire: '', cod: '', numar: '' }],
+                investigatiiRadiologice: [{ denumire: '', cod: '', numar: '' }],
+                alteProceduri: [{ denumire: '', cod: '', numar: '' }],
+                analizeLaborator: [{ denumire: '', cod: '', numar: '' }],
+                vizite: [{
+                    data: '',
+                    explorariFunctionale: [{ denumire: '', cod: '', numar: '' }],
+                    investigatiiRadiologice: [{ denumire: '', cod: '', numar: '' }],
+                    proceduri: [{ denumire: '', cod: '', numar: '' }],
+                    analize: [{ denumire: '', cod: '', numar: '' }],
+                }],
+                tratamente: [{ data: '', descriere: '' }],
+                epicriza: ''
+            });
+
+            // Debug: log currentView
+            console.log('currentView', currentView);
+            // Fetch patients from API when entering 'patients' view
+            useEffect(() => {
+                console.log('INTRU IN useEffect patients', currentView);
+                if (currentView === 'patients') {
+                    setLoadingPatients(true);
+                    setPatientsError(null);
+                    API.get(API_CONFIG.endpoints.pacienti)
+                        .then(data => {
+                            console.log('API pacienti response:', data);
+                            setPatients(data.patients || []);
+                        })
+                        .catch(err => {
+                            setPatientsError('Eroare la încărcarea pacienților');
+                        })
+                        .finally(() => setLoadingPatients(false));
+                }
+            }, [currentView]);
+
+            // Date identificare
+
+
+            // Helper: extract birthdate and age from CNP
+            function getBirthDateAndAgeFromCNP(cnp) {
+                if (!cnp || cnp.length !== 13) return { birthDate: '', age: '' };
+                const s = cnp[0];
+                let year = parseInt(cnp.substr(1, 2), 10);
+                let month = parseInt(cnp.substr(3, 2), 10);
+                let day = parseInt(cnp.substr(5, 2), 10);
+                let century = 1900;
+                if (s === '1' || s === '2') century = 1900;
+                else if (s === '3' || s === '4') century = 1800;
+                else if (s === '5' || s === '6') century = 2000;
+                else if (s === '7' || s === '8') century = 2000; // rezidenti/straini
+                else return { birthDate: '', age: '' };
+                year = century + year;
+                // Validate date
+                const dateStr = `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                const dateObj = new Date(dateStr);
+                if (isNaN(dateObj.getTime())) return { birthDate: '', age: '' };
+                // Calculate age
+                const today = new Date();
+                let age = today.getFullYear() - year;
+                if (
+                    today.getMonth() + 1 < month ||
+                    (today.getMonth() + 1 === month && today.getDate() < day)
+                ) {
+                    age--;
+                }
+                return { birthDate: dateStr, age: age.toString() };
+            }
+
+            // Update birthdate and age automatically when CNP changes
+            useEffect(() => {
+                const { birthDate, age } = getBirthDateAndAgeFromCNP(formData.cnp);
+                // Only update birthDate and age, do not auto-fill judet
+                if (birthDate !== formData.dataNasterii || age !== formData.varsta) {
+                    setFormData(prev => ({ ...prev, dataNasterii: birthDate, varsta: age }));
+                }
+            }, [formData.cnp]);
+            const [errors, setErrors] = useState({});
+
+
+            // Romanian CNP validation (length, digits, control digit)
+            function isValidCNP(cnp) {
+                if (!/^[0-9]{13}$/.test(cnp)) return false;
+                const control = '279146358279';
+                let sum = 0;
+                for (let i = 0; i < 12; i++) {
+                    sum += parseInt(cnp[i], 10) * parseInt(control[i], 10);
+                }
+                let check = sum % 11;
+                if (check === 10) check = 1;
+                return check === parseInt(cnp[12], 10);
+            }
+
+            const renderLabel = (field, text) => (
+                <label>{text}{errors[field] && <span className="required-star">*</span>}{field === 'cnp' && errors.cnpInvalid && <span style={{ color: '#e87461', marginLeft: 8, fontWeight: 400 }}>(CNP invalid)</span>}</label>
+            );
+
+            const validateStep = (step) => {
+                const missing = [];
+                const addIfEmpty = (field) => {
+                    const val = formData[field];
+                    if (typeof val === 'boolean') return; // check only non-boolean
+                    if (val === undefined || val === null) {
+                        missing.push(field);
+                        return;
+                    }
+                    if (typeof val === 'string' && val.trim() === '') {
+                        missing.push(field);
+                    }
+                };
+
+                let cnpInvalid = false;
+                let nrRegistruInvalid = false;
+
+                if (step === 0) {
+                    // Adaugare Pacient fields
+                    ['nume', 'prenume', 'cnp', 'sex'].forEach(addIfEmpty);
+                    // CNP validation
+                    if (formData.cnp && !isValidCNP(formData.cnp)) {
+                        cnpInvalid = true;
+                        missing.push('cnp');
+                    }
+                } else if (step === 1) {
+                    // Locatie spital fields
+                    ['judet', 'localitate', 'spital', 'sectie'].forEach(addIfEmpty);
+                } else if (step === 2) {
+                    // Date de Identificare Pacient / Date Personale fields
+                    ['grupSanguin', 'rh', 'domiciliuLocalitate', 'domiciliuMediu', 'domiciliuStrada', 'domiciliuNumar'].forEach(addIfEmpty);
+                    if (!formData.resedintaSameDomiciliu) {
+                        ['resedintaLocalitate', 'resedintaMediu', 'resedintaStrada', 'resedintaNumar'].forEach(addIfEmpty);
+                    }
+                } else if (step === 3) {
+                    // Date Sociale si Profesionale
+                    ['cetatenie', 'ocupatia', 'nivelInstruire', 'statutAsigurat', 'nrRegistru', 'tipServicii', 'diagnosticPrincipal'].forEach(addIfEmpty);
+                    if (formData.statutAsigurat === 'cnas') addIfEmpty('categorieAsigurat');
+                    // Validare nrRegistru: max 6 cifre
+                    if (formData.nrRegistru && !/^\d{1,6}$/.test(formData.nrRegistru)) {
+                        nrRegistruInvalid = true;
+                        missing.push('nrRegistru');
+                    }
+                }
+
+                const errs = {};
+                missing.forEach(f => errs[f] = true);
+                if (cnpInvalid) errs.cnpInvalid = true;
+                if (nrRegistruInvalid) errs.nrRegistruInvalid = true;
+                setErrors(errs);
+                return missing.length === 0;
+            };
+
+            // History drawer state and mock history data
+            const [historyOpen, setHistoryOpen] = useState(false);
+            const [historyItems, setHistoryItems] = useState([]);
+            const [patientHistoryOpen, setPatientHistoryOpen] = useState(false);
+            const [selectedPatientForHistory, setSelectedPatientForHistory] = useState(null);
+            const [loadingPatientSpitalizari, setLoadingPatientSpitalizari] = useState(false);
+            const [patientSpitalizariList, setPatientSpitalizariList] = useState([]);
+            const [patientSpitalizari, setPatientSpitalizari] = useState({
+                '1234567890123': [
+                    { id: 1, data: '08.02.2026', sectie: 'Cardiologie', status: 'completed', ultimaModificare: '09.02.2026 - Dr. Ionescu' },
+                    { id: 3, data: '15.01.2026', sectie: 'Cardiologie', status: 'completed', ultimaModificare: '18.01.2026 - Dr. Ionescu' }
+                ],
+                '2987654321098': [
+                    { id: 4, data: '05.02.2026', sectie: 'Oncologie', status: 'completed', ultimaModificare: '10.02.2026 - Dr. Popescu' }
+                ],
+                '3456789012345': [
+                    { id: 5, data: '20.01.2026', sectie: 'Neurologie', status: 'completed', ultimaModificare: '22.01.2026 - Dr. Mihai' },
+                    { id: 6, data: '01.02.2026', sectie: 'Neurologie', status: 'completed', ultimaModificare: '03.02.2026 - Dr. Mihai' }
+                ],
+                '4321098765432': [
+                    { id: 7, data: '28.01.2026', sectie: 'Chirurgie', status: 'completed', ultimaModificare: '30.01.2026 - Dr. Stoian' }
+                ],
+                '5678901234567': [
+                    { id: 8, data: '12.02.2026', sectie: 'Cardiologie', status: 'draft', ultimaModificare: '12.02.2026 - Dr. Ionescu' }
+                ],
+                '6789012345678': [
+                    { id: 9, data: '03.02.2026', sectie: 'Ortopedie', status: 'completed', ultimaModificare: '05.02.2026 - Dr. Popescu' }
+                ]
+            });
+
+            const mockHistory = {
+                1: [
+                    { date: '08.02.2026', user: 'Dr. Ionescu', changes: 'Foaie creată' },
+                    { date: '09.02.2026', user: 'Dr. Ionescu', changes: 'Actualizare date pacient' }
+                ],
+                2: [
+                    { date: '10.02.2026', user: 'Dr. Popescu', changes: 'Ciornă inițială' }
+                ]
+            };
+
+            const openHistory = (record, e) => {
+                if (e && e.stopPropagation) e.stopPropagation();
+                setSelectedRecord(record);
+
+                // Try to fetch history from API first
+                API.get(`${API_CONFIG.endpoints.spitalizari}/${record.id}/history`)
+                    .then(data => {
+                        const history = data.history || [];
+                        if (history.length > 0) {
+                            setHistoryItems(history);
+                        } else {
+                            // If API returns empty, use mockHistory or fallback
+                            const fallbackHistory = mockHistory[record.id] || [
+                                {
+                                    date: record.ultima_modificare ? record.ultima_modificare.split(' - ')[0] : new Date().toLocaleDateString('ro-RO'),
+                                    user: record.ultima_modificare ? record.ultima_modificare.split(' - ')[1] : 'Unknown',
+                                    changes: record.status === 'completata' ? 'Fișă completată' : 'Fișă în curs'
+                                }
+                            ];
+                            setHistoryItems(fallbackHistory);
+                        }
+                    })
+                    .catch(err => {
+                        // Fallback: use mockHistory or construct from record data
+                        console.log('History API not available, using fallback');
+                        const fallbackHistory = mockHistory[record.id] || [
+                            {
+                                date: record.ultima_modificare ? record.ultima_modificare.split(' - ')[0] : new Date().toLocaleDateString('ro-RO'),
+                                user: record.ultima_modificare ? record.ultima_modificare.split(' - ')[1] : 'Unknown',
+                                changes: record.status === 'completata' ? 'Fișă completată' : 'Fișă în curs'
+                            }
+                        ];
+                        setHistoryItems(fallbackHistory);
+                    });
+
+                setHistoryOpen(true);
+            };
+
+            const closeHistory = () => {
+                setHistoryOpen(false);
+            };
+
+            const openPatientHistory = (patient, e) => {
+                if (e && e.stopPropagation) e.stopPropagation();
+                setSelectedPatientForHistory(patient);
+                setLoadingPatientSpitalizari(true);
+
+                // Fetch spitalizari for this patient from API
+                API.get(`${API_CONFIG.endpoints.spitalizari}?cnp=${patient.cnp}`)
+                    .then(data => {
+                        const spitalizariList = data.spitalizari || [];
+                        setPatientSpitalizariList(spitalizariList);
+                    })
+                    .catch(err => {
+                        console.error('Error fetching patient spitalizari:', err);
+                        setPatientSpitalizariList([]);
+                    })
+                    .finally(() => {
+                        setLoadingPatientSpitalizari(false);
+                    });
+
+                setPatientHistoryOpen(true);
+            };
+
+            const closePatientHistory = () => {
+                setPatientHistoryOpen(false);
+            };
+
+            // Custom modal state for delete confirmation
+            const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+            const [patientToDelete, setPatientToDelete] = useState(null);
+
+            const deletePatient = (patientId) => {
+                setPatientToDelete(patientId);
+                setDeleteModalOpen(true);
+            };
+
+            const confirmDeletePatient = () => {
+                setPatients(patients.filter(p => p.id !== patientToDelete));
+                setDeleteModalOpen(false);
+                setPatientToDelete(null);
+            };
+
+            const cancelDeletePatient = () => {
+                setDeleteModalOpen(false);
+                setPatientToDelete(null);
+            };
+
+            const exportToPDF = (record) => {
+                const removeDiacritics = (text) => {
+                    if (!text) return '';
+                    const diacriticsMap = {
+                        'ă': 'a', 'Ă': 'A',
+                        'â': 'a', 'Â': 'A',
+                        'à': 'a', 'À': 'A',
+                        'á': 'a', 'Á': 'A',
+                        'ạ': 'a', 'Ạ': 'A',
+                        'ả': 'a', 'Ả': 'A',
+                        'ấ': 'a', 'Ấ': 'A',
+                        'ầ': 'a', 'Ầ': 'A',
+                        'ẩ': 'a', 'Ẩ': 'A',
+                        'ẫ': 'a', 'Ẫ': 'A',
+                        'ậ': 'a', 'Ậ': 'A',
+                        'ế': 'e', 'Ế': 'E',
+                        'ề': 'e', 'Ề': 'E',
+                        'ễ': 'e', 'Ễ': 'E',
+                        'ệ': 'e', 'Ệ': 'E',
+                        'è': 'e', 'È': 'E',
+                        'é': 'e', 'É': 'E',
+                        'ê': 'e', 'Ê': 'E',
+                        'ë': 'e', 'Ë': 'E',
+                        'í': 'i', 'Í': 'I',
+                        'ì': 'i', 'Ì': 'I',
+                        'î': 'i', 'Î': 'I',
+                        'ï': 'i', 'Ï': 'I',
+                        'ỉ': 'i', 'Ỉ': 'I',
+                        'ị': 'i', 'Ị': 'I',
+                        'ó': 'o', 'Ó': 'O',
+                        'ò': 'o', 'Ò': 'O',
+                        'ô': 'o', 'Ô': 'O',
+                        'ö': 'o', 'Ö': 'O',
+                        'ỏ': 'o', 'Ỏ': 'O',
+                        'ọ': 'o', 'Ọ': 'O',
+                        'ố': 'o', 'Ố': 'O',
+                        'ồ': 'o', 'Ồ': 'O',
+                        'ổ': 'o', 'Ổ': 'O',
+                        'ỗ': 'o', 'Ỗ': 'O',
+                        'ộ': 'o', 'Ộ': 'O',
+                        'ớ': 'o', 'Ớ': 'O',
+                        'ờ': 'o', 'Ờ': 'O',
+                        'ở': 'o', 'Ở': 'O',
+                        'ỡ': 'o', 'Ỡ': 'O',
+                        'ợ': 'o', 'Ợ': 'O',
+                        'ú': 'u', 'Ú': 'U',
+                        'ù': 'u', 'Ù': 'U',
+                        'û': 'u', 'Û': 'U',
+                        'ü': 'u', 'Ü': 'U',
+                        'ủ': 'u', 'Ủ': 'U',
+                        'ụ': 'u', 'Ụ': 'U',
+                        'ứ': 'u', 'Ứ': 'U',
+                        'ừ': 'u', 'Ừ': 'U',
+                        'ử': 'u', 'Ử': 'U',
+                        'ữ': 'u', 'Ữ': 'U',
+                        'ự': 'u', 'Ự': 'U',
+                        'ý': 'y', 'Ý': 'Y',
+                        'ỳ': 'y', 'Ỳ': 'Y',
+                        'ỵ': 'y', 'Ỵ': 'Y',
+                        'ỷ': 'y', 'Ỷ': 'Y',
+                        'ỹ': 'y', 'Ỹ': 'Y',
+                        'ç': 'c', 'Ç': 'C',
+                        'č': 'c', 'Č': 'C',
+                        'ć': 'c', 'Ć': 'C',
+                        'ñ': 'n', 'Ñ': 'N',
+                        'ń': 'n', 'Ń': 'N',
+                        'ň': 'n', 'Ň': 'N',
+                        'š': 's', 'Š': 'S',
+                        'ś': 's', 'Ś': 'S',
+                        'ș': 's', 'Ș': 'S',
+                        'ş': 's', 'Ş': 'S',
+                        'ż': 'z', 'Ż': 'Z',
+                        'ź': 'z', 'Ź': 'Z',
+                        'ž': 'z', 'Ž': 'Z',
+                        'ț': 't', 'Ț': 'T',
+                        'ţ': 't', 'Ţ': 'T',
+                        'ť': 't', 'Ť': 'T',
+                        'đ': 'd', 'Đ': 'D',
+                        'ð': 'd', 'Ð': 'D'
+                    };
+                    return String(text).replace(/[^\u0000-\u007F]/g, (char) => diacriticsMap[char] || char);
+                };
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+
+                let yPos = 15;
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 15;
+                const maxWidth = 180;
+
+                const addText = (text, fontSize, fontType = 'normal', isBold = false) => {
+                    if (yPos > pageHeight - 20) {
+                        doc.addPage();
+                        yPos = 15;
+                    }
+                    doc.setFontSize(fontSize);
+                    if (isBold) doc.setFont(undefined, 'bold');
+                    doc.text(removeDiacritics(text), margin, yPos, { maxWidth });
+                    yPos += fontSize / 2.5 + 2;
+                    doc.setFont(undefined, 'normal');
+                };
+
+                const addSection = (title) => {
+                    yPos += 3;
+                    doc.setDrawColor(124, 181, 169);
+                    doc.setLineWidth(0.5);
+                    doc.line(margin, yPos, margin + maxWidth, yPos);
+                    yPos += 4;
+                    addText(title, 12, 'bold', true);
+                };
+
+                const addField = (label, value) => {
+                    if (yPos > pageHeight - 20) {
+                        doc.addPage();
+                        yPos = 15;
+                    }
+                    doc.setFontSize(10);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(removeDiacritics(`${label}:`), margin, yPos);
+                    doc.setFont(undefined, 'normal');
+                    yPos += 5;
+                    doc.setFontSize(10);
+                    const lines = doc.splitTextToSize(removeDiacritics(value || '-'), maxWidth - 5);
+                    lines.forEach((line) => {
+                        if (yPos > pageHeight - 20) {
+                            doc.addPage();
+                            yPos = 15;
+                        }
+                        doc.text(removeDiacritics(line), margin + 5, yPos);
+                        yPos += 5;
+                    });
+                    yPos += 2;
+                };
+
+                // Header
+                doc.setFontSize(16);
+                doc.setFont(undefined, 'bold');
+                doc.text(removeDiacritics('FIȘĂ SPITALIZARE DE ZI'), margin, yPos);
+                yPos += 10;
+
+                // Patient Info
+                addSection('DATE GENERALE');
+                addField('Pacient', `${record.details?.prenume || ''} ${record.details?.nume || ''}`);
+                addField('CNP', record.details?.cnp || '-');
+                addField('Data Spitalizării', record.data || '-');
+                addField('Secția', record.details?.sectie || '-');
+                addField('Status', record.status === 'completed' ? 'Completată' : 'În curs');
+
+                // Administrative Data
+                addSection('DATE ADMINISTRATIVE');
+                addField('Spital', record.details?.spital || '-');
+                addField('Județ', record.details?.judet || '-');
+                addField('Localitate', record.details?.localitate || '-');
+
+                // Patient Identification
+                addSection('DATE IDENTIFICARE');
+                addField('Sex', record.details?.sex === 'M' ? 'Masculin' : record.details?.sex === 'F' ? 'Feminin' : record.details?.sex === 'N/A' ? 'Nu doresc sa specific' : '-');
+                addField('Data Nașterii', record.details?.dataNasterii || '-');
+                addField('Grupa Sanguina', `${record.details?.grupSanguin || '-'} ${record.details?.rh || '-'}`);
+                addField('Alergic la', record.details?.alergicLa || '-');
+
+                // Personal Data
+                addSection('DATE PERSONALE');
+                addField('Cetățenie', record.details?.cetatenie || '-');
+                addField('Ocupația', record.details?.ocupatia || '-');
+                addField('Locul de Muncă', record.details?.locDeMunca || '-');
+                addField('Nivel Instruire', record.details?.nivelInstruire || '-');
+
+                // Insurance
+                addSection('STATUT DE ASIGURAT');
+                addField('Statut', record.details?.statutAsigurat || '-');
+                addField('Categorie', record.details?.categorieAsigurat || '-');
+                addField('Nr. Registru Național', record.details?.nrRegistru || '-');
+
+                // Medical Data
+                addSection('DATE MEDICALE');
+                addField('Diagnostic Principal', record.details?.diagnosticPrincipal || '-');
+                addField('Cod ICD', record.details?.codICD || '-');
+
+                if (record.details?.diagnosticeSecundare && record.details.diagnosticeSecundare.length > 0) {
+                    addField('Diagnostice Secundare', record.details.diagnosticeSecundare.join(', '));
+                }
+
+                // Investigations
+                if (record.details?.explorariFunctionale && record.details.explorariFunctionale.length > 0) {
+                    addSection('EXPLORĂRI FUNCȚIONALE');
+                    record.details.explorariFunctionale.forEach(item => {
+                        if (item.denumire) {
+                            addField(item.denumire, `Cod: ${item.cod}, Număr: ${item.numar}`);
+                        }
+                    });
+                }
+
+                if (record.details?.investigatiiRadiologice && record.details.investigatiiRadiologice.length > 0) {
+                    addSection('INVESTIGAȚII RADIOLOGICE');
+                    record.details.investigatiiRadiologice.forEach(item => {
+                        if (item.denumire) {
+                            addField(item.denumire, `Cod: ${item.cod}, Număr: ${item.numar}`);
+                        }
+                    });
+                }
+
+                if (record.details?.analizeLaborator && record.details.analizeLaborator.length > 0) {
+                    addSection('ANALIZE LABORATOR');
+                    record.details.analizeLaborator.forEach(item => {
+                        if (item.denumire) {
+                            addField(item.denumire, `Cod: ${item.cod}, Număr: ${item.numar}`);
+                        }
+                    });
+                }
+
+                // Treatments
+                if (record.details?.tratamente && record.details.tratamente.length > 0) {
+                    addSection('TRATAMENTE');
+                    record.details.tratamente.forEach(item => {
+                        addField(`${item.data}`, item.descriere);
+                    });
+                }
+
+                // Epicriza
+                if (record.details?.epicriza) {
+                    addSection('EPICRIZA');
+                    addField('Observații Clinice', record.details.epicriza);
+                }
+
+                // Footer
+                yPos = pageHeight - 10;
+                doc.setFontSize(8);
+                doc.setTextColor(150);
+                doc.text(removeDiacritics(`Generat: ${new Date().toLocaleDateString('ro-RO')} ${new Date().toLocaleTimeString('ro-RO')}`), margin, yPos);
+
+                // Download
+                const fileName = `Spitalizare_${removeDiacritics(record.details?.cnp || 'pacient')}_${removeDiacritics(record.data || 'data')}.pdf`;
+                doc.save(fileName);
+            };
+
+            // Fetch spitalizări din API când intri în view-ul de listă
+            useEffect(() => {
+                if (currentView === 'list') {
+                    setLoadingSpitalizari(true);
+                    setSpitalizariError(null);
+                    API.get(API_CONFIG.endpoints.spitalizari)
+                        .then(data => {
+                            setSpitalizari(data.spitalizari || []);
+                        })
+                        .catch(err => {
+                            setSpitalizariError('Eroare la încărcarea spitalizărilor');
+                        })
+                        .finally(() => setLoadingSpitalizari(false));
+                }
+            }, [currentView]);
+
+            const steps = [
+                { title: 'Adaugare Pacient', key: 'addpatient' },
+                { title: 'Locație spital', key: 'location' },
+                { title: 'Date pacient', key: 'patient' },
+                { title: 'Detalii personale', key: 'details' },
+                { title: 'Investigatii', key: 'investigations' }
+            ];
+
+            // Stats data
+            const statsData = [
+                {
+                    label: 'Total Spitalizări',
+                    value: '834',
+                    trend: '+12%',
+                    trendUp: true,
+                    icon: '📋',
+                    color: 'blue'
+                },
+                {
+                    label: 'Spitalizări Luna Curentă',
+                    value: '117',
+                    trend: '+8%',
+                    trendUp: true,
+                    icon: '📅',
+                    color: 'green'
+                },
+                {
+                    label: 'Spitalizări În Curs',
+                    value: '15',
+                    trend: '-3%',
+                    trendUp: false,
+                    icon: '⏳',
+                    color: 'orange'
+                },
+                {
+                    label: 'Medici Activi',
+                    value: '18',
+                    trend: '+2',
+                    trendUp: true,
+                    icon: '👨‍⚕️',
+                    color: 'purple'
+                }
+            ];
+
+            useEffect(() => {
+                if (currentView === 'dashboard') {
+                    // Destroy existing charts
+                    if (lineChartInstance.current) lineChartInstance.current.destroy();
+                    if (pieChartInstance.current) pieChartInstance.current.destroy();
+                    if (barChartInstance.current) barChartInstance.current.destroy();
+                    if (doughnutChartInstance.current) doughnutChartInstance.current.destroy();
+
+                    // Line Chart - Daily Registrations
+                    if (lineChartRef.current) {
+                        const ctx = lineChartRef.current.getContext('2d');
+                        lineChartInstance.current = new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: ['Lun', 'Mar', 'Mie', 'Joi', 'Vin', 'Sâm', 'Dum'],
+                                datasets: [{
+                                    label: 'Înregistrări',
+                                    data: [7, 9, 11, 5, 4, 20, 8],
+                                    borderColor: '#7cb5a9',
+                                    backgroundColor: 'rgba(124, 181, 169, 0.1)',
+                                    tension: 0.4,
+                                    fill: true,
+                                    pointBackgroundColor: '#7cb5a9',
+                                    pointBorderColor: '#fff',
+                                    pointBorderWidth: 2,
+                                    pointRadius: 5
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false }
+                                },
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        grid: { color: '#f0e6d9' }
+                                    },
+                                    x: {
+                                        grid: { display: false }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Pie Chart - Specializations
+                    if (pieChartRef.current) {
+                        const ctx = pieChartRef.current.getContext('2d');
+                        pieChartInstance.current = new Chart(ctx, {
+                            type: 'pie',
+                            data: {
+                                labels: ['Cardiologie', 'Neurologie', 'Chirurgie', 'Ortopedie', 'Gastroenterologie'],
+                                datasets: [{
+                                    data: [38, 29, 24, 15, 10],
+                                    backgroundColor: [
+                                        '#7cb5a9',
+                                        '#8dc4a0',
+                                        '#ffc168',
+                                        '#e87461',
+                                        '#b8a5d6'
+                                    ],
+                                    borderWidth: 2,
+                                    borderColor: '#fff'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        position: 'bottom',
+                                        labels: {
+                                            padding: 15,
+                                            font: { size: 12 }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Bar Chart - Monthly Trend
+                    if (barChartRef.current) {
+                        const ctx = barChartRef.current.getContext('2d');
+                        barChartInstance.current = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: ['Ian', 'Feb', 'Mar', 'Apr', 'Mai', 'Iun'],
+                                datasets: [{
+                                    label: 'Spitalizări',
+                                    data: [45, 52, 48, 58, 55, 42],
+                                    backgroundColor: '#7cb5a9',
+                                    borderRadius: 8,
+                                    borderSkipped: false
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false }
+                                },
+                                scales: {
+                                    y: {
+                                        beginAtZero: true,
+                                        grid: { color: '#f0e6d9' }
+                                    },
+                                    x: {
+                                        grid: { display: false }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    // Doughnut Chart - Status Distribution
+                    if (doughnutChartRef.current) {
+                        const ctx = doughnutChartRef.current.getContext('2d');
+                        doughnutChartInstance.current = new Chart(ctx, {
+                            type: 'doughnut',
+                            data: {
+                                labels: ['Completate', 'În Curs'],
+                                datasets: [{
+                                    data: [65, 25],
+                                    backgroundColor: [
+                                        '#8dc4a0',
+                                        '#ffc168',
+                                        '#e87461'
+                                    ],
+                                    borderWidth: 2,
+                                    borderColor: '#fff'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        position: 'bottom',
+                                        labels: {
+                                            padding: 15,
+                                            font: { size: 12 }
+                                        }
+                                    }
+                                },
+                                cutout: '70%'
+                            }
+                        });
+                    }
+                }
+
+                return () => {
+                    // Cleanup
+                    if (lineChartInstance.current) lineChartInstance.current.destroy();
+                    if (pieChartInstance.current) pieChartInstance.current.destroy();
+                    if (barChartInstance.current) barChartInstance.current.destroy();
+                    if (doughnutChartInstance.current) doughnutChartInstance.current.destroy();
+                };
+            }, [currentView]);
+
+            const handleInputChange = (field, value) => {
+                setFormData(prev => ({
+                    ...prev,
+                    [field]: value
+                }));
+                // Reset localitate dacă se schimbă județul pentru dropdownuri
+                if (field === 'judet') setFormData(prev => ({ ...prev, localitate: '' }));
+                if (field === 'domiciliuJudet') setFormData(prev => ({ ...prev, domiciliuLocalitate: '' }));
+                if (field === 'resedintaJudet') setFormData(prev => ({ ...prev, resedintaLocalitate: '' }));
+            };
+
+            const createPatientInDB = async () => {
+                try {
+                    // Extract birthdate from CNP
+                    const { birthDate } = getBirthDateAndAgeFromCNP(formData.cnp);
+
+                    const patientData = {
+                        cnp: formData.cnp,
+                        nume: formData.nume,
+                        prenume: formData.prenume,
+                        sex: formData.sex,
+                        data_nasterii: birthDate
+                    };
+
+                    const response = await API.post(API_CONFIG.endpoints.pacienti, patientData);
+
+                    // Console log the CNP
+                    console.log('Patient CNP:', formData.cnp);
+                    console.log('API Response:', response);
+
+                    // If patient already exists or was created successfully, we can proceed
+                    return true;
+                } catch (error) {
+                    // Check if error is because patient exists
+                    if (error.message.includes('exist') || error.message.includes('already')) {
+                        // Patient exists, just log and continue
+                        console.log('Patient with CNP already exists:', formData.cnp);
+                        console.log('Using existing patient with CNP:', formData.cnp);
+                        return true;
+                    }
+                    console.error('Error creating patient:', error);
+                    setErrors({ api: error.message });
+                    return false;
+                }
+            };
+
+            const handleNext = () => {
+                // Validate current step before proceeding
+                if (!validateStep(currentStep)) {
+                    return; // don't proceed if validation failed
+                }
+                setErrors({});
+                if (currentStep === 0) {
+                    // Create patient in DB before moving to next step
+                    createPatientInDB().then(success => {
+                        if (success) {
+                            setCurrentStep(currentStep + 1);
+                        }
+                    });
+                } else if (currentStep < 4) {
+                    setCurrentStep(currentStep + 1);
+                } else if (currentStep === 4) {
+                    // Create spitalizare in DB before moving to success screen
+                    savePatient().then(success => {
+                        if (success) {
+                            setCurrentStep(5); // Move to success screen
+                        }
+                    });
+                }
+            };
+
+            const handleBack = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(currentStep - 1);
+                }
+            };
+
+            const resetForm = () => {
+                setFormData({
+                    judet: '',
+                    localitate: '',
+                    spital: '',
+                    sectie: '',
+                    nume: '',
+                    prenume: '',
+                    cnp: '',
+                    sex: '',
+                    dataNasterii: '',
+                    grupSanguin: '',
+                    rh: '',
+                    alergicLa: '',
+                    domiciliuJudet: '',
+                    domiciliuLocalitate: '',
+                    domiciliuMediu: '',
+                    domiciliuStrada: '',
+                    domiciliuNumar: '',
+                    resedintaSameDomiciliu: false,
+                    resedintaJudet: '',
+                    resedintaLocalitate: '',
+                    resedintaMediu: '',
+                    resedintaStrada: '',
+                    resedintaNumar: '',
+                    cetatenie: '',
+                    ocupatia: '',
+                    locDeMunca: '',
+                    nivelInstruire: '',
+                    statutAsigurat: '',
+                    categorieAsigurat: '',
+                    nrRegistru: '',
+                    tipServicii: '',
+                    diagnosticPrincipal: '',
+                    codICD: '',
+                    diagnosticeSecundare: [''],
+                    explorariFunctionale: [{ denumire: '', cod: '', numar: '' }],
+                    investigatiiRadiologice: [{ denumire: '', cod: '', numar: '' }],
+                    alteProceduri: [{ denumire: '', cod: '', numar: '' }],
+                    analizeLaborator: [{ denumire: '', cod: '', numar: '' }],
+                    vizite: [{
+                        data: '',
+                        explorariFunctionale: [{ denumire: '', cod: '', numar: '' }],
+                        investigatiiRadiologice: [{ denumire: '', cod: '', numar: '' }],
+                        proceduri: [{ denumire: '', cod: '', numar: '' }],
+                        analize: [{ denumire: '', cod: '', numar: '' }],
+                    }],
+                    tratamente: [{ data: '', descriere: '' }],
+                    epicriza: ''
+                });
+                setSelectedRecord(null);
+                setCurrentStep(0);
+                setErrors({});
+            };
+
+            // Convert API snake_case field names to component camelCase field names
+            const convertAPIDataToFormFields = (apiData) => {
+                if (!apiData) return {};
+
+                return {
+                    // Administrative fields
+                    judet: apiData.judet || '',
+                    localitate: apiData.localitate || '',
+                    spital: apiData.spital || '',
+                    sectie: apiData.sectie || '',
+
+                    // Patient identification
+                    nume: apiData.nume || '',
+                    prenume: apiData.prenume || '',
+                    cnp: apiData.cnp_pacient || apiData.cnp || '',
+                    sex: apiData.pacient_sex || apiData.sex || '',
+                    dataNasterii: apiData.pacient_data_nasterii || apiData.data_nasterii || '',
+
+                    // Personal data
+                    grupSanguin: apiData.grup_sanguin || apiData.grupa_sanguin || '',
+                    rh: apiData.rh || '',
+                    alergicLa: apiData.alergic_la || '',
+
+                    // Address (Domiciliu)
+                    domiciliuJudet: apiData.domiciliu_judet || '',
+                    domiciliuLocalitate: apiData.domiciliu_localitate || '',
+                    domiciliuMediu: apiData.domiciliu_mediu || '',
+                    domiciliuStrada: apiData.domiciliu_strada || '',
+                    domiciliuNumar: apiData.domiciliu_numar || '',
+                    resedintaSameDomiciliu: apiData.resedinta_same_domiciliu === 1 || apiData.resedinta_same_domiciliu === true || false,
+                    resedintaJudet: apiData.resedinta_judet || '',
+                    resedintaLocalitate: apiData.resedinta_localitate || '',
+                    resedintaMediu: apiData.resedinta_mediu || '',
+                    resedintaStrada: apiData.resedinta_strada || '',
+                    resedintaNumar: apiData.resedinta_numar || '',
+
+                    // Social and professional data
+                    cetatenie: apiData.cetatenie || '',
+                    ocupatia: apiData.ocupatia || '',
+                    locDeMunca: apiData.loc_de_munca || '',
+                    nivelInstruire: apiData.nivel_instruire || '',
+
+                    // Insurance status
+                    statutAsigurat: apiData.statut_asigurat || '',
+                    categorieAsigurat: apiData.categorie_asigurat || '',
+
+                    // Medical data
+                    nrRegistru: apiData.nr_registru || '',
+                    tipServicii: apiData.tip_servicii || '',
+                    diagnosticPrincipal: apiData.diagnostic_principal || '',
+                    codICD: apiData.cod_icd || '',
+                    diagnosticeSecundare: apiData.diagnostice_secundare || [],
+
+                    // Investigations
+                    explorariFunctionale: apiData.explorari_functionale || [],
+                    investigatiiRadiologice: apiData.investigatii_radiologice || [],
+                    alteProceduri: apiData.alte_proceduri || [],
+                    analizeLaborator: apiData.analize_laborator || [],
+
+                    // Treatments
+                    tratamente: apiData.tratamente || [],
+                    epicriza: apiData.epicriza || ''
+                };
+            };
+
+            const handleRecordClick = (record) => {
+                setSelectedRecord(record);
+                setPreviousView(currentView); // save from where we came
+                if (record.status === 'draft') {
+                    setCurrentView('form');
+                    setCurrentStep(0);
+                } else {
+                    // Fetch full details from API for completed/completata records
+                    API.get(`${API_CONFIG.endpoints.spitalizari}?id=${record.id}`)
+                        .then(data => {
+                            // Convert API field names to component format
+                            const apiDataObj = data.spitalizare || data;
+                            const convertedDetails = convertAPIDataToFormFields(apiDataObj);
+
+                            // Merge API response with record and set full details
+                            const fullRecord = {
+                                ...record,
+                                details: convertedDetails
+                            };
+                            setSelectedRecord(fullRecord);
+                            setCurrentView('details');
+                        })
+                        .catch(err => {
+                            console.error('Error fetching spitalizare details:', err);
+                            // Still show details with partial data if API fails
+                            setCurrentView('details');
+                        });
+                }
+            };
+
+            const handleEditClick = (record) => {
+                // Store complete record including ID for later update
+                setSelectedRecord({ ...record });
+                setPreviousView(currentView);
+
+                // Fetch full details from API
+                API.get(`${API_CONFIG.endpoints.spitalizari}?id=${record.id}`)
+                    .then(data => {
+                        // Convert API field names to component format
+                        const apiDataObj = data.spitalizare || data;
+                        const convertedData = convertAPIDataToFormFields(apiDataObj);
+
+                        // Load the data into formData for editing
+                        setFormData(prev => ({
+                            ...prev,
+                            ...convertedData
+                        }));
+
+                        // Ensure selectedRecord keeps the ID
+                        setSelectedRecord(prev => ({ ...prev, id: record.id }));
+
+                        setCurrentView('form');
+                        setCurrentStep(0);
+                    })
+                    .catch(err => {
+                        console.error('Error fetching spitalizare for editing:', err);
+                        // Still open the form even if API fails
+                        setCurrentView('form');
+                        setCurrentStep(0);
+                    });
+            };
+
+            const addDiagnosticSecundar = () => {
+                if (formData.diagnosticeSecundare.length < 7) {
+                    setFormData(prev => ({
+                        ...prev,
+                        diagnosticeSecundare: [...prev.diagnosticeSecundare, '']
+                    }));
+                }
+            };
+
+            const updateDiagnosticSecundar = (index, value) => {
+                const newDiagnostice = [...formData.diagnosticeSecundare];
+                newDiagnostice[index] = value;
+                setFormData(prev => ({
+                    ...prev,
+                    diagnosticeSecundare: newDiagnostice
+                }));
+            };
+
+            const removeDiagnosticSecundar = (index) => {
+                const newDiagnostice = formData.diagnosticeSecundare.filter((_, i) => i !== index);
+                setFormData(prev => ({
+                    ...prev,
+                    diagnosticeSecundare: newDiagnostice
+                }));
+            };
+
+            // Handlers for Investigatii section
+            const addExplorariFunctionale = () => {
+                if (formData.explorariFunctionale.length < 7) {
+                    setFormData(prev => ({
+                        ...prev,
+                        explorariFunctionale: [...prev.explorariFunctionale, { denumire: '', cod: '', numar: '' }]
+                    }));
+                }
+            };
+
+            const updateExplorariFunctionale = (index, field, value) => {
+                const newItems = [...formData.explorariFunctionale];
+                newItems[index][field] = value;
+                setFormData(prev => ({
+                    ...prev,
+                    explorariFunctionale: newItems
+                }));
+            };
+
+            const removeExplorariFunctionale = (index) => {
+                const newItems = formData.explorariFunctionale.filter((_, i) => i !== index);
+                setFormData(prev => ({
+                    ...prev,
+                    explorariFunctionale: newItems
+                }));
+            };
+
+            const addInvestigatiiRadiologice = () => {
+                if (formData.investigatiiRadiologice.length < 7) {
+                    setFormData(prev => ({
+                        ...prev,
+                        investigatiiRadiologice: [...prev.investigatiiRadiologice, { denumire: '', cod: '', numar: '' }]
+                    }));
+                }
+            };
+
+            const updateInvestigatiiRadiologice = (index, field, value) => {
+                const newItems = [...formData.investigatiiRadiologice];
+                newItems[index][field] = value;
+                setFormData(prev => ({
+                    ...prev,
+                    investigatiiRadiologice: newItems
+                }));
+            };
+
+            const removeInvestigatiiRadiologice = (index) => {
+                const newItems = formData.investigatiiRadiologice.filter((_, i) => i !== index);
+                setFormData(prev => ({
+                    ...prev,
+                    investigatiiRadiologice: newItems
+                }));
+            };
+
+            const addAlteProceduri = () => {
+                if (formData.alteProceduri.length < 7) {
+                    setFormData(prev => ({
+                        ...prev,
+                        alteProceduri: [...prev.alteProceduri, { denumire: '', cod: '', numar: '' }]
+                    }));
+                }
+            };
+
+            const updateAlteProceduri = (index, field, value) => {
+                const newItems = [...formData.alteProceduri];
+                newItems[index][field] = value;
+                setFormData(prev => ({
+                    ...prev,
+                    alteProceduri: newItems
+                }));
+            };
+
+            const removeAlteProceduri = (index) => {
+                const newItems = formData.alteProceduri.filter((_, i) => i !== index);
+                setFormData(prev => ({
+                    ...prev,
+                    alteProceduri: newItems
+                }));
+            };
+
+            const addAnalizeLaborator = () => {
+                if (formData.analizeLaborator.length < 7) {
+                    setFormData(prev => ({
+                        ...prev,
+                        analizeLaborator: [...prev.analizeLaborator, { denumire: '', cod: '', numar: '' }]
+                    }));
+                }
+            };
+
+            const updateAnalizeLaborator = (index, field, value) => {
+                const newItems = [...formData.analizeLaborator];
+                newItems[index][field] = value;
+                setFormData(prev => ({
+                    ...prev,
+                    analizeLaborator: newItems
+                }));
+            };
+
+            const removeAnalizeLaborator = (index) => {
+                const newItems = formData.analizeLaborator.filter((_, i) => i !== index);
+                setFormData(prev => ({
+                    ...prev,
+                    analizeLaborator: newItems
+                }));
+            };
+
+            const handleMenuClick = (menu) => {
+                setActiveMenu(menu);
+                if (menu === 'dashboard') {
+                    setCurrentView('dashboard');
+                } else if (menu === 'spitalizari') {
+                    setCurrentView('list');
+                } else if (menu === 'pacienti') {
+                    setCurrentView('patients');
+                }
+            };
+
+            // Clear judet when entering patient form (but not when editing an existing record)
+            useEffect(() => {
+                if (currentView === 'form' && (!selectedRecord || !selectedRecord.id)) {
+                    setFormData(prev => ({
+                        ...prev,
+                        judet: '',
+                        domiciliuJudet: '',
+                        resedintaJudet: ''
+                    }));
+                }
+            }, [currentView, selectedRecord]);
+
+            // Ensure menu highlight matches view when returning from details/history
+            useEffect(() => {
+                if (currentView === 'dashboard' && activeMenu !== 'dashboard') setActiveMenu('dashboard');
+                if (currentView === 'list' && activeMenu !== 'spitalizari') setActiveMenu('spitalizari');
+                if (currentView === 'patients' && activeMenu !== 'pacienti') setActiveMenu('pacienti');
+            }, [currentView]);
+
+            const savePatient = async () => {
+                try {
+                    // Create spitalizari object from form data
+                    const { birthDate } = getBirthDateAndAgeFromCNP(formData.cnp);
+
+                    // Filter out empty entries from investigation arrays
+                    const filterEmptyItems = (items) => items.filter(item => {
+                        if (typeof item === 'string') return item.trim() !== '';
+                        if (typeof item === 'object') return item.denumire && item.denumire.trim() !== '';
+                        return false;
+                    });
+
+                    const spitalizariData = {
+                        cnp: formData.cnp,
+                        nume: formData.nume,
+                        prenume: formData.prenume,
+                        sex: formData.sex,
+                        data_nasterii: birthDate,
+                        varsta: formData.varsta,
+                        // Administrative
+                        judet: formData.judet,
+                        localitate: formData.localitate,
+                        spital: formData.spital,
+                        sectie: formData.sectie,
+                        // Personal details
+                        grup_sanguin: formData.grupSanguin,
+                        rh: formData.rh,
+                        alergic_la: formData.alergicLa,
+                        domiciliu_judet: formData.domiciliuJudet,
+                        domiciliu_localitate: formData.domiciliuLocalitate,
+                        domiciliu_mediu: formData.domiciliuMediu,
+                        domiciliu_strada: formData.domiciliuStrada,
+                        domiciliu_numar: formData.domiciliuNumar,
+                        resedinta_same_domiciliu: formData.resedintaSameDomiciliu,
+                        resedinta_judet: formData.resedintaJudet,
+                        resedinta_localitate: formData.resedintaLocalitate,
+                        resedinta_mediu: formData.resedintaMediu,
+                        resedinta_strada: formData.resedintaStrada,
+                        resedinta_numar: formData.resedintaNumar,
+                        // Social/Professional
+                        cetatenie: formData.cetatenie,
+                        ocupatia: formData.ocupatia,
+                        loc_de_munca: formData.locDeMunca,
+                        nivel_instruire: formData.nivelInstruire,
+                        statut_asigurat: formData.statutAsigurat,
+                        categorie_asigurat: formData.categorieAsigurat,
+                        // Medical
+                        nr_registru: formData.nrRegistru,
+                        tip_servicii: formData.tipServicii,
+                        diagnostic_principal: formData.diagnosticPrincipal,
+                        cod_icd: formData.codICD,
+                        diagnostice_secundare: filterEmptyItems(formData.diagnosticeSecundare),
+                        // Investigations
+                        explorari_functionale: filterEmptyItems(formData.explorariFunctionale),
+                        investigatii_radiologice: filterEmptyItems(formData.investigatiiRadiologice),
+                        alte_proceduri: filterEmptyItems(formData.alteProceduri),
+                        analize_laborator: filterEmptyItems(formData.analizeLaborator),
+                        // Other
+                        tratamente: filterEmptyItems(formData.tratamente),
+                        epicriza: formData.epicriza,
+                        status: 'completed',
+                        data_internare: new Date().toISOString().split('T')[0],
+                        data_adaugarii: new Date().toLocaleDateString('ro-RO')
+                    };
+
+                    // Check if we're editing an existing record
+                    if (selectedRecord && selectedRecord.id) {
+                        // UPDATE existing record - include ID in data
+                        const updateData = {
+                            id: selectedRecord.id,
+                            ...spitalizariData
+                        };
+                        const response = await API.put(`${API_CONFIG.endpoints.spitalizari}/${selectedRecord.id}`, updateData);
+
+                        console.log('Spitalizare updated successfully:', response);
+                        console.log('Patient CNP:', formData.cnp);
+
+                        // Update in local state
+                        setSpitalizari(spitalizari.map(s => s.id === selectedRecord.id ? { ...s, ...spitalizariData } : s));
+                    } else {
+                        // CREATE new record
+                        const response = await API.post(API_CONFIG.endpoints.spitalizari, spitalizariData);
+
+                        console.log('Spitalizare created successfully:', response);
+                        console.log('Patient CNP:', formData.cnp);
+
+                        // Add to local state as well
+                        setSpitalizari([...spitalizari, spitalizariData]);
+                    }
+
+                    return true;
+                } catch (error) {
+                    console.error('Error saving spitalizare:', error);
+                    setErrors({ api: error.message });
+                    return false;
+                }
+            };
+
+            // Stare pentru căutare pacienți și spitalizări
+            const [searchPacienti, setSearchPacienti] = useState('');
+            const [searchSpitalizari, setSearchSpitalizari] = useState('');
+
+            return (
+                <div className="app-container">
+                    {/* Sidebar */}
+                    <div className="sidebar">
+                        <div className="sidebar-header">
+                            <div className="logo">
+                                <div className="logo-icon">M</div>
+                                <span>MedApp</span>
+                            </div>
+                        </div>
+
+                        {/* History drawer & overlay */}
+                        <div className={`history-overlay ${historyOpen ? 'open' : ''}`} onClick={closeHistory}></div>
+                        <div className={`history-drawer ${historyOpen ? 'open' : ''}`}>
+                            <div className="history-header">
+                                <div>
+                                    <div style={{ fontWeight: 600 }}>{selectedRecord ? (selectedRecord.nume || 'Pacient necunoscut') : 'Istoric'}</div>
+                                    <div style={{ fontSize: 12, color: '#7a6b5f' }}>{selectedRecord ? (`ID: ${selectedRecord.id}`) : ''}</div>
+                                </div>
+                                <div>
+                                    <button className="btn-icon" onClick={closeHistory}>Închide</button>
+                                </div>
+                            </div>
+                            <div style={{ marginTop: 12 }}>
+                                {historyItems.length === 0 && <div className="history-item">Nu există modificări.</div>}
+                                {historyItems.map((h, idx) => (
+                                    <div key={idx} className="history-item">
+                                        <div style={{ fontSize: 13, fontWeight: 600 }}>{h.date} — {h.user}</div>
+                                        <div style={{ fontSize: 13, color: '#6b5d52', marginTop: 6 }}>{h.changes}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Patient History drawer & overlay */}
+                        <div className={`history-overlay ${patientHistoryOpen ? 'open' : ''}`} onClick={closePatientHistory}></div>
+                        <div className={`history-drawer ${patientHistoryOpen ? 'open' : ''}`}>
+                            <div className="history-header">
+                                <div>
+                                    <div style={{ fontWeight: 600 }}>{selectedPatientForHistory ? `${selectedPatientForHistory.prenume} ${selectedPatientForHistory.nume}` : 'Spitalizări Pacient'}</div>
+                                    <div style={{ fontSize: 12, color: '#7a6b5f' }}>{selectedPatientForHistory ? `CNP: ${selectedPatientForHistory.cnp}` : ''}</div>
+                                </div>
+                                <div>
+                                    <button className="btn-icon" onClick={closePatientHistory}>Închide</button>
+                                </div>
+                            </div>
+                            <div style={{ marginTop: 12 }}>
+                                {loadingPatientSpitalizari ? (
+                                    <div className="history-item">Se încarcă spitalizările...</div>
+                                ) : patientSpitalizariList.length === 0 ? (
+                                    <div className="history-item">Nu există spitalizări înregistrate.</div>
+                                ) : (
+                                    patientSpitalizariList.map((spitalizare, idx) => (
+                                        <div key={idx} className="history-item" style={{ cursor: 'pointer', transition: 'all 0.2s' }} onClick={() => { handleRecordClick(spitalizare); closePatientHistory(); }}>
+                                            <div style={{ fontSize: 13, fontWeight: 600 }}>{spitalizare.data_formatted || spitalizare.data} — {spitalizare.sectie}</div>
+                                            <div style={{ fontSize: 12, color: '#6b5d52', marginTop: 6 }}>Status: <span style={{ color: (spitalizare.status === 'completed' || spitalizare.status === 'completata') ? '#2d6a3e' : '#9b6b1a' }}>{(spitalizare.status === 'completed' || spitalizare.status === 'completata') ? 'Completată' : 'În curs'}</span></div>
+                                            <div style={{ fontSize: 12, color: '#6b5d52', marginTop: 4 }}>{spitalizare.ultima_modificare || spitalizare.ultimaModificare || '-'}</div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="user-profile">
+                            <div className="user-avatar">FB</div>
+                            <div className="user-info">
+                                <div className="user-name">Dr. Florentina Bandasila</div>
+                                <div className="user-role">Medic General</div>
+                            </div>
+                        </div>
+
+                        <div className="sidebar-menu">
+                            <div
+                                className={`menu-item ${activeMenu === 'dashboard' ? 'active' : ''}`}
+                                onClick={() => handleMenuClick('dashboard')}
+                            >
+                                <span>📊</span>
+                                <span>Dashboard</span>
+
+                            </div>
+                            <div
+                                className={`menu-item ${activeMenu === 'spitalizari' ? 'active' : ''}`}
+                                onClick={() => handleMenuClick('spitalizari')}
+                            >
+                                <span>📋</span>
+                                <span>Spitalizări</span>
+                            </div>
+                            <div
+                                className={`menu-item ${activeMenu === 'pacienti' ? 'active' : ''}`}
+                                onClick={() => handleMenuClick('pacienti')}
+                            >
+                                <span>👥</span>
+                                <span>Pacienți</span>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    {/* Main Content */}
+                    <div className="main-content">
+                        {currentView === 'dashboard' && (
+                            <>
+                                <div className="dashboard-header">
+                                    <h1 className="dashboard-title">Dashboard</h1>
+                                </div>
+
+                                {/* Stats Cards */}
+                                <div className="stats-grid">
+                                    {statsData.map((stat, index) => (
+                                        <div key={index} className="stat-card">
+                                            <div className="stat-header">
+                                                <div className={`stat-icon ${stat.color}`}>
+                                                    {stat.icon}
+                                                </div>
+                                                <div className={`stat-trend ${stat.trendUp ? 'up' : 'down'}`}>
+                                                    {stat.trend}
+                                                </div>
+                                            </div>
+                                            <div className="stat-value">{stat.value}</div>
+                                            <div className="stat-label">{stat.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Charts */}
+                                <div className="charts-grid">
+                                    <div className="chart-card">
+                                        <div className="chart-header">
+                                            <div className="chart-title">Înregistrări Zilnice</div>
+                                            <div className="chart-subtitle">În ultima săptămână</div>
+                                        </div>
+                                        <div className="chart-container">
+                                            <canvas ref={lineChartRef}></canvas>
+                                        </div>
+                                    </div>
+
+                                    <div className="chart-card">
+                                        <div className="chart-header">
+                                            <div className="chart-title">Distribuție pe Specializări</div>
+                                            <div className="chart-subtitle">În luna curentă</div>
+                                        </div>
+                                        <div className="chart-container">
+                                            <canvas ref={pieChartRef}></canvas>
+                                        </div>
+                                    </div>
+
+                                    <div className="chart-card">
+                                        <div className="chart-header">
+                                            <div className="chart-title">Evoluție Lunară</div>
+                                            <div className="chart-subtitle">În ultimele 6 luni</div>
+                                        </div>
+                                        <div className="chart-container">
+                                            <canvas ref={barChartRef}></canvas>
+                                        </div>
+                                    </div>
+
+                                    <div className="chart-card">
+                                        <div className="chart-header">
+                                            <div className="chart-title">Status Fișe</div>
+                                        </div>
+                                        <div className="chart-container">
+                                            <canvas ref={doughnutChartRef}></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {currentView === 'list' && (
+                            <div className="list-view">
+                                <div className="list-header">
+                                    <h1>Spitalizări de Zi</h1>
+                                    <button className="btn-primary" onClick={() => { setCurrentView('form'); setCurrentStep(0); }}>
+                                        + Adaugă Spitalizare
+                                    </button>
+                                </div>
+                                <div style={{ marginBottom: 16 }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Caută după numele pacientului"
+                                        style={{ width: '100%', maxWidth: 350, padding: 10, borderRadius: 8, border: '1px solid #d4c4b0' }}
+                                        value={searchSpitalizari}
+                                        onChange={e => setSearchSpitalizari(e.target.value)}
+                                    />
+                                </div>
+                                <div className="table-container">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Data</th>
+                                                <th>Nume Pacient</th>
+                                                <th>CNP</th>
+                                                <th>Secția</th>
+                                                <th>Status</th>
+                                                <th>Ultima Modificare</th>
+                                                <th>Actiuni</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {loadingSpitalizari ? (
+                                                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px' }}>Se încarcă spitalizările...</td></tr>
+                                            ) : spitalizariError ? (
+                                                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'red' }}>{spitalizariError}</td></tr>
+                                            ) : spitalizari.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                                                        Nu există spitalizări înregistrate
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                spitalizari.filter(record => {
+                                                    const q = (searchSpitalizari || '').toLowerCase();
+                                                    if (!q) return true;
+                                                    return (record.nume_complet || record.nume || '').toLowerCase().includes(q);
+                                                }).map(record => (
+                                                    <tr key={record.id} onClick={() => handleRecordClick(record)}>
+                                                        <td>{record.data_formatted || record.data || '-'}</td>
+                                                        <td>{record.nume_complet || (record.nume ? (record.nume + (record.prenume ? ' ' + record.prenume : '')) : '-')}</td>
+                                                        <td>{record.cnp_pacient || record.cnp || '-'}</td>
+                                                        <td>{record.sectie || '-'}</td>
+                                                        <td>
+                                                            <span className={`status-badge ${(record.status === 'completed' || record.status === 'completata') ? 'status-completed' : 'status-draft'}`}>
+                                                                {(record.status === 'completed' || record.status === 'completata') ? 'Completată' : 'În curs'}
+                                                            </span>
+                                                        </td>
+                                                        <td>{record.ultima_modificare || record.ultimaModificare || '-'}</td>
+                                                        <td>
+                                                            <div className="action-buttons">
+                                                                <button className="btn-icon" onClick={(e) => { e.stopPropagation(); handleEditClick(record); }}>Editează</button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {currentView === 'patients' && (
+                            <>
+                                <div className="list-view">
+                                    <div className="list-header">
+                                        <h1>Pacienți</h1>
+                                    </div>
+                                    <div style={{ marginBottom: 16 }}>
+                                        <input
+                                            type="text"
+                                            placeholder="Caută după nume sau prenume pacient"
+                                            style={{ width: '100%', maxWidth: 350, padding: 10, borderRadius: 8, border: '1px solid #d4c4b0' }}
+                                            value={searchPacienti}
+                                            onChange={e => setSearchPacienti(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="table-container">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Nume</th>
+                                                    <th>Prenume</th>
+                                                    <th>CNP</th>
+                                                    <th>Sex</th>
+                                                    <th>Data Nașterii</th>
+                                                    <th>Data Adăugării</th>
+                                                    <th>Vizualizare</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {loadingPatients ? (
+                                                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px' }}>Se încarcă pacienții...</td></tr>
+                                                ) : patientsError ? (
+                                                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'red' }}>{patientsError}</td></tr>
+                                                ) : patients.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                                                            Nu există pacienti înregistrați
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    patients.filter(patient => {
+                                                        const q = (searchPacienti || '').toLowerCase();
+                                                        if (!q) return true;
+                                                        return (patient.nume || '').toLowerCase().includes(q) || (patient.prenume || '').toLowerCase().includes(q);
+                                                    }).map((patient, index) => (
+                                                        <tr key={index}>
+                                                            <td>{patient.nume || '-'}</td>
+                                                            <td>{patient.prenume || '-'}</td>
+                                                            <td>{patient.cnp || '-'}</td>
+                                                            <td>{patient.sex === 'M' ? 'Masculin' : patient.sex === 'F' ? 'Feminin' : patient.sex === 'N/A' ? 'Nu doresc sa specific' : '-'}</td>
+                                                            <td>{patient.data_nasterii || patient.dataNasterii || '-'}</td>
+                                                            <td>{patient.data_adaugarii_formatted || patient.dataAdaugarii || '-'}</td>
+                                                            <td>
+                                                                <div className="action-buttons">
+                                                                    <button className="btn-icon" onClick={(e) => openPatientHistory(patient, e)}>Fișe</button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {currentView === 'details' && selectedRecord && (
+                            <div className="details-view">
+                                <div className="details-header">
+                                    <div className="details-header-info">
+                                        <h1>{selectedRecord.nume}</h1>
+                                        <p>CNP: {selectedRecord.cnp} | Secția: {selectedRecord.sectie} | Data: {selectedRecord.data}</p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <button className="details-back-btn" onClick={() => {
+                                            if (previousView === 'patients') {
+                                                setCurrentView('patients');
+                                                setActiveMenu('pacienti');
+                                            } else {
+                                                setCurrentView('list');
+                                                setActiveMenu('spitalizari');
+                                            }
+                                        }}>← Înapoi la Listă</button>
+                                        <button className="details-back-btn" onClick={() => exportToPDF(selectedRecord)}>Export PDF</button>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Date Administrative</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Județ</div>
+                                            <div className="details-field-value">{selectedRecord.details?.judet || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Localitate</div>
+                                            <div className="details-field-value">{selectedRecord.details?.localitate || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Spital</div>
+                                            <div className="details-field-value">{selectedRecord.details?.spital || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Secția</div>
+                                            <div className="details-field-value">{selectedRecord.details?.sectie || '-'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Date Identificare Pacient</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Nume</div>
+                                            <div className="details-field-value">{selectedRecord.details?.nume || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Prenume</div>
+                                            <div className="details-field-value">{selectedRecord.details?.prenume || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">CNP</div>
+                                            <div className="details-field-value">{selectedRecord.details?.cnp || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Sex</div>
+                                            <div className="details-field-value">{selectedRecord.details?.sex === 'M' ? 'Masculin' : selectedRecord.details?.sex === 'F' ? 'Feminin' : selectedRecord.details?.sex === 'N/A' ? 'Nu doresc sa specific' : '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Data Nașterii</div>
+                                            <div className="details-field-value">{selectedRecord.details?.dataNasterii || '-'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Date Personale</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Grupa Sanguina</div>
+                                            <div className="details-field-value">{selectedRecord.details?.grupSanguin || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Rh</div>
+                                            <div className="details-field-value">{selectedRecord.details?.rh || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Alergic la</div>
+                                            <div className="details-field-value">{selectedRecord.details?.alergicLa || '-'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Domiciliu Legal</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Județul</div>
+                                            <div className="details-field-value">{selectedRecord.details?.domiciliuJudet || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Localitate</div>
+                                            <div className="details-field-value">{selectedRecord.details?.domiciliuLocalitate || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Mediu</div>
+                                            <div className="details-field-value">{selectedRecord.details?.domiciliuMediu || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Stradă</div>
+                                            <div className="details-field-value">{selectedRecord.details?.domiciliuStrada || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Număr</div>
+                                            <div className="details-field-value">{selectedRecord.details?.domiciliuNumar || '-'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Date Sociale și Profesionale</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Cetățenie</div>
+                                            <div className="details-field-value">{selectedRecord.details?.cetatenie || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Ocupația</div>
+                                            <div className="details-field-value">{selectedRecord.details?.ocupatia || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Locul de Muncă</div>
+                                            <div className="details-field-value">{selectedRecord.details?.locDeMunca || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Nivel Instruire</div>
+                                            <div className="details-field-value">{selectedRecord.details?.nivelInstruire || '-'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Statut de Asigurat</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Statut</div>
+                                            <div className="details-field-value">{selectedRecord.details?.statutAsigurat || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Categorie</div>
+                                            <div className="details-field-value">{selectedRecord.details?.categorieAsigurat || '-'}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Date Medicale - Diagnostic</div>
+                                    <div className="details-grid">
+                                        <div className="details-field">
+                                            <div className="details-field-label">Nr. Registru</div>
+                                            <div className="details-field-value">{selectedRecord.details?.nrRegistru || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Tip Servicii</div>
+                                            <div className="details-field-value">{selectedRecord.details?.tipServicii || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Diagnostic Principal</div>
+                                            <div className="details-field-value">{selectedRecord.details?.diagnosticPrincipal || '-'}</div>
+                                        </div>
+                                        <div className="details-field">
+                                            <div className="details-field-label">Cod ICD</div>
+                                            <div className="details-field-value">{selectedRecord.details?.codICD || '-'}</div>
+                                        </div>
+                                    </div>
+                                    {(selectedRecord.details?.diagnosticeSecundare && selectedRecord.details.diagnosticeSecundare.length > 0) && (
+                                        <div style={{ marginTop: '16px' }}>
+                                            <div className="details-field-label" style={{ marginBottom: '12px' }}>Diagnostice Secundare</div>
+                                            <ul className="details-list">
+                                                {(selectedRecord.details.diagnosticeSecundare || []).map((diag, idx) => (
+                                                    <li key={idx}>{diag}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Investigații</div>
+                                    {selectedRecord.details?.explorariFunctionale && selectedRecord.details.explorariFunctionale.length > 0 && (
+                                        <div style={{ marginBottom: '20px' }}>
+                                            <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#6b5d52', marginBottom: '10px' }}>Explorări Funcționale</h4>
+                                            <ul className="details-list">
+                                                {selectedRecord.details.explorariFunctionale.map((item, idx) => (
+                                                    <li key={idx}>{item.denumire} ({item.cod}) - {item.numar}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                    {selectedRecord.details?.investigatiiRadiologice && selectedRecord.details.investigatiiRadiologice.length > 0 && (
+                                        <div style={{ marginBottom: '20px' }}>
+                                            <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#6b5d52', marginBottom: '10px' }}>Investigații Radiologice</h4>
+                                            <ul className="details-list">
+                                                {selectedRecord.details.investigatiiRadiologice.map((item, idx) => (
+                                                    <li key={idx}>{item.denumire} ({item.cod}) - {item.numar}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                    {selectedRecord.details?.alteProceduri && selectedRecord.details.alteProceduri.length > 0 && (
+                                        <div style={{ marginBottom: '20px' }}>
+                                            <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#6b5d52', marginBottom: '10px' }}>Alte Proceduri</h4>
+                                            <ul className="details-list">
+                                                {selectedRecord.details.alteProceduri.map((item, idx) => (
+                                                    <li key={idx}>{item.denumire} ({item.cod}) - {item.numar}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                    {selectedRecord.details?.analizeLaborator && selectedRecord.details.analizeLaborator.length > 0 && (
+                                        <div>
+                                            <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#6b5d52', marginBottom: '10px' }}>Analize Laborator</h4>
+                                            <ul className="details-list">
+                                                {selectedRecord.details.analizeLaborator.map((item, idx) => (
+                                                    <li key={idx}>{item.denumire} ({item.cod}) - {item.numar}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Tratamente</div>
+                                    {selectedRecord.details?.tratamente && selectedRecord.details.tratamente.length > 0 && (
+                                        <ul className="details-list">
+                                            {selectedRecord.details.tratamente.map((tratament, idx) => (
+                                                <li key={idx}><strong>{tratament.data}</strong> - {tratament.descriere}</li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+
+                                <div className="details-section">
+                                    <div className="details-section-title">Epicriza</div>
+                                    <div style={{ fontSize: '14px', color: '#3d3228', lineHeight: '1.6', padding: '12px', backgroundColor: '#f5ede4', borderRadius: '8px' }}>
+                                        {selectedRecord.details?.epicriza || '-'}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {currentView === 'form' && (
+                            <div className="form-wizard">
+                                <div className="wizard-header">
+                                    <div className="wizard-steps">
+                                        {steps.map((step, index) => (
+                                            <React.Fragment key={step.key}>
+                                                <div className={`step ${currentStep === index ? 'active' : ''} ${currentStep > index ? 'completed' : ''}`}>
+                                                    <div className="step-number">{index + 1}</div>
+                                                    <div className="step-label">{step.title}</div>
+                                                </div>
+                                                {index < steps.length - 1 && <div className="step-line"></div>}
+                                            </React.Fragment>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="wizard-content">
+
+                                    {currentStep === 0 && (
+                                        <div className="form-section">
+                                            <h2 className="section-title">Adaugare Pacient</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('nume', 'Nume')}
+                                                    <input
+                                                        type="text"
+                                                        value={formData.nume}
+                                                        onChange={(e) => handleInputChange('nume', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('prenume', 'Prenume')}
+                                                    <input
+                                                        type="text"
+                                                        value={formData.prenume}
+                                                        onChange={(e) => handleInputChange('prenume', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('cnp', 'CNP')}
+                                                    <input
+                                                        type="text"
+                                                        maxLength="13"
+                                                        value={formData.cnp}
+                                                        onChange={(e) => handleInputChange('cnp', e.target.value)}
+                                                        style={errors.cnpInvalid ? { borderColor: '#e87461', background: '#fff6f4' } : {}}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('sex', 'Sex')}
+                                                    <select value={formData.sex} onChange={(e) => handleInputChange('sex', e.target.value)}>
+                                                        <option value="">Selectați sexul</option>
+                                                        <option value="M">Masculin</option>
+                                                        <option value="F">Feminin</option>
+                                                        <option value="N/A">Nu doresc sa specific</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('dataNasterii', "Data Nașterii")}
+                                                    <input
+                                                        type="date"
+                                                        value={formData.dataNasterii}
+                                                        readOnly
+                                                        disabled
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('varsta', 'Vârstă')}
+                                                    <input
+                                                        type="text"
+                                                        value={formData.varsta}
+                                                        readOnly
+                                                        disabled
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {currentStep === 1 && (
+                                        <div className="form-section">
+                                            <h2 className="section-title">Date Administrative</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('judet', 'Județ')}
+                                                    <select value={formData.judet} onChange={e => handleInputChange('judet', e.target.value)}>
+                                                        <option value="">Selectați județului</option>
+                                                        {window.judeteShort?.map(j => <option key={j} value={j}>{j}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('localitate', 'Localitate')}
+                                                    <select value={formData.localitate} onChange={e => handleInputChange('localitate', e.target.value)} disabled={!formData.judet}>
+                                                        <option value="">Selectați localitatea</option>
+                                                        {window.judetLocalitati?.[formData.judet]?.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('spital', 'Spital')}
+                                                    <input
+                                                        type="text"
+                                                        value={formData.spital}
+                                                        onChange={e => handleInputChange('spital', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('sectie', 'Secția')}
+                                                    <select value={formData.sectie} onChange={(e) => handleInputChange('sectie', e.target.value)}>
+                                                        <option value="">Selectați secția</option>
+                                                        <option value="cardiologie">Cardiologie</option>
+                                                        <option value="neurologie">Neurologie</option>
+                                                        <option value="chirurgie">Chirurgie Generală</option>
+                                                        <option value="ortopedie">Ortopedie</option>
+                                                        <option value="gastroenterologie">Gastroenterologie</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {currentStep === 2 && (
+                                        <div className="form-section">
+
+                                            <h2 className="section-title" style={{ marginTop: '40px' }}>Date Personale</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('grupSanguin', 'Grupa Sanguina')}
+                                                    <select value={formData.grupSanguin} onChange={(e) => handleInputChange('grupSanguin', e.target.value)}>
+                                                        <option value="">Selectați grupa</option>
+                                                        <option value="A">A</option>
+                                                        <option value="B">B</option>
+                                                        <option value="AB">AB</option>
+                                                        <option value="0">0</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('rh', 'Rh')}
+                                                    <select value={formData.rh} onChange={(e) => handleInputChange('rh', e.target.value)}>
+                                                        <option value="">Selectați Rh</option>
+                                                        <option value="pozitiv">Pozitiv</option>
+                                                        <option value="negativ">Negativ</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('alergicLa', 'Alergic la')}
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.alergicLa}
+                                                        onChange={(e) => handleInputChange('alergicLa', e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <h2 className="section-title" style={{ marginTop: '40px' }}>Domiciliu Legal</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('domiciliuJudet', 'Județ')}
+                                                    <select value={formData.domiciliuJudet} onChange={e => handleInputChange('domiciliuJudet', e.target.value)}>
+                                                        <option value="">Selectați județul</option>
+                                                        {window.judeteShort?.map(j => <option key={j} value={j}>{j}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('domiciliuLocalitate', 'Localitate')}
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.domiciliuLocalitate}
+                                                        onChange={(e) => handleInputChange('domiciliuLocalitate', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('domiciliuMediu', 'Mediu')}
+                                                    <select value={formData.domiciliuMediu} onChange={(e) => handleInputChange('domiciliuMediu', e.target.value)}>
+                                                        <option value="">Selectați mediul</option>
+                                                        <option value="urban">Urban</option>
+                                                        <option value="rural">Rural</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('domiciliuStrada', 'Stradă')}
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.domiciliuStrada}
+                                                        onChange={(e) => handleInputChange('domiciliuStrada', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('domiciliuNumar', 'Număr')}
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.domiciliuNumar}
+                                                        onChange={(e) => handleInputChange('domiciliuNumar', e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="checkbox-group">
+                                                <input
+                                                    type="checkbox"
+                                                    id="sameAddress"
+                                                    checked={formData.resedintaSameDomiciliu}
+                                                    onChange={(e) => {
+                                                        const isChecked = e.target.checked;
+                                                        if (isChecked) {
+                                                            // Copy domiciliu to resedinta
+                                                            setFormData(prev => ({
+                                                                ...prev,
+                                                                resedintaSameDomiciliu: true,
+                                                                resedintaJudet: prev.domiciliuJudet,
+                                                                resedintaLocalitate: prev.domiciliuLocalitate,
+                                                                resedintaMediu: prev.domiciliuMediu,
+                                                                resedintaStrada: prev.domiciliuStrada,
+                                                                resedintaNumar: prev.domiciliuNumar
+                                                            }));
+                                                        } else {
+                                                            setFormData(prev => ({
+                                                                ...prev,
+                                                                resedintaSameDomiciliu: false
+                                                            }));
+                                                        }
+                                                    }}
+                                                />
+                                                <label htmlFor="sameAddress">Reședința este aceeași cu domiciliul</label>
+                                            </div>
+
+                                            {!formData.resedintaSameDomiciliu && (
+                                                <>
+                                                    <h2 className="section-title" style={{ marginTop: '40px' }}>Reședință</h2>
+                                                    <div className="form-grid">
+                                                        <div className="form-group">
+                                                            {renderLabel('resedintaJudet', 'Județ')}
+                                                            <select value={formData.resedintaJudet} onChange={e => handleInputChange('resedintaJudet', e.target.value)}>
+                                                                <option value="">Selectați județul</option>
+                                                                {window.judeteShort?.map(j => <option key={j} value={j}>{j}</option>)}
+                                                            </select>
+                                                        </div>
+                                                        <div className="form-group">
+                                                            {renderLabel('resedintaLocalitate', 'Localitate')}
+                                                            <input
+                                                                type="text"
+
+                                                                value={formData.resedintaLocalitate}
+                                                                onChange={(e) => handleInputChange('resedintaLocalitate', e.target.value)}
+                                                            />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            {renderLabel('resedintaMediu', 'Mediu')}
+                                                            <select value={formData.resedintaMediu} onChange={(e) => handleInputChange('resedintaMediu', e.target.value)}>
+                                                                <option value="">Selectați mediul</option>
+                                                                <option value="urban">Urban</option>
+                                                                <option value="rural">Rural</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="form-group">
+                                                            {renderLabel('resedintaStrada', 'Stradă')}
+                                                            <input
+                                                                type="text"
+
+                                                                value={formData.resedintaStrada}
+                                                                onChange={(e) => handleInputChange('resedintaStrada', e.target.value)}
+                                                            />
+                                                        </div>
+                                                        <div className="form-group">
+                                                            {renderLabel('resedintaNumar', 'Număr')}
+                                                            <input
+                                                                type="text"
+
+                                                                value={formData.resedintaNumar}
+                                                                onChange={(e) => handleInputChange('resedintaNumar', e.target.value)}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {currentStep === 3 && (
+                                        <div className="form-section">
+                                            <h2 className="section-title">Date Sociale și Profesionale</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('cetatenie', 'Cetățenie')}
+                                                    <select value={formData.cetatenie} onChange={(e) => handleInputChange('cetatenie', e.target.value)}>
+                                                        <option value="">Selectați cetățenia</option>
+                                                        <option value="romana">Română</option>
+                                                        <option value="straina">Străină</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('ocupatia', 'Ocupația')}
+                                                    <select value={formData.ocupatia} onChange={(e) => handleInputChange('ocupatia', e.target.value)}>
+                                                        <option value="">Selectați ocupația</option>
+                                                        <option value="angajat">Angajat</option>
+                                                        <option value="pensionar">Pensionar</option>
+                                                        <option value="student">Student</option>
+                                                        <option value="somer">Șomer</option>
+                                                        <option value="independent">Lucrător independent</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('locDeMunca', 'Locul de Muncă')}
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.locDeMunca}
+                                                        onChange={(e) => handleInputChange('locDeMunca', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('nivelInstruire', 'Nivel de Instruire')}
+                                                    <select value={formData.nivelInstruire} onChange={(e) => handleInputChange('nivelInstruire', e.target.value)}>
+                                                        <option value="">Selectați nivelul</option>
+                                                        <option value="fara">Fără studii</option>
+                                                        <option value="primar">Primar</option>
+                                                        <option value="gimnazial">Gimnazial</option>
+                                                        <option value="liceal">Liceal</option>
+                                                        <option value="profesional">Profesional</option>
+                                                        <option value="superior">Superior</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <h2 className="section-title" style={{ marginTop: '40px' }}>Statut de Asigurat</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('statutAsigurat', 'Statut Asigurat')}
+                                                    <select value={formData.statutAsigurat} onChange={(e) => handleInputChange('statutAsigurat', e.target.value)}>
+                                                        <option value="">Selectați statutul</option>
+                                                        <option value="cnas">Asigurat CNAS</option>
+                                                        <option value="voluntar">Asigurare voluntară</option>
+                                                        <option value="neasigurat">Neasigurat</option>
+                                                    </select>
+                                                </div>
+                                                {formData.statutAsigurat === 'cnas' && (
+                                                    <div className="form-group">
+                                                        {renderLabel('categorieAsigurat', 'Categorie Asigurat CNAS')}
+                                                        <select value={formData.categorieAsigurat} onChange={(e) => handleInputChange('categorieAsigurat', e.target.value)}>
+                                                            <option value="">Selectați categoria</option>
+                                                            <option value="salariat">Salariat</option>
+                                                            <option value="coasigurat">Coasigurat</option>
+                                                            <option value="pensionar">Pensionar</option>
+                                                            <option value="copil">Copil {'<'} 18 ani</option>
+                                                            <option value="student">Elev / Student 18-26 ani</option>
+                                                            <option value="gravida">Gravidă</option>
+                                                            <option value="handicap">Persoană cu handicap</option>
+                                                            <option value="ajutor">Ajutor social</option>
+                                                            <option value="somer">Șomer</option>
+                                                            <option value="altele">Alte categorii</option>
+                                                        </select>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <h2 className="section-title" style={{ marginTop: '40px' }}>Date Medicale - Diagnostic</h2>
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    {renderLabel('nrRegistru', 'Nr. din Registrul Național')}
+                                                    <input
+                                                        type="text"
+                                                        maxLength="6"
+                                                        pattern="[0-9]*"
+                                                        inputMode="numeric"
+                                                        value={formData.nrRegistru}
+                                                        onChange={e => {
+                                                            // Permite doar cifre și max 6 caractere
+                                                            const v = e.target.value.replace(/\D/g, '').slice(0, 6);
+                                                            handleInputChange('nrRegistru', v);
+                                                        }}
+                                                        style={errors.nrRegistruInvalid ? { borderColor: '#e87461', background: '#fff6f4' } : {}}
+                                                    />
+                                                    {errors.nrRegistruInvalid && <span style={{ color: '#e87461', fontSize: 12 }}>Introduceți maxim 6 cifre</span>}
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('tipServicii', 'Tip Servicii Spitalizare de Zi')}
+                                                    <select value={formData.tipServicii} onChange={(e) => handleInputChange('tipServicii', e.target.value)}>
+                                                        <option value="">Selectați tipul</option>
+                                                        <option value="chimiotherapie">Chimiotherapie</option>
+                                                        <option value="hemodializa">Hemodializă</option>
+                                                        <option value="investigatii">Investigații</option>
+                                                        <option value="tratamente">Tratamente</option>
+                                                    </select>
+                                                </div>
+                                                <div className="form-group">
+                                                    {renderLabel('diagnosticPrincipal', 'Diagnostic Principal')}
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.diagnosticPrincipal}
+                                                        onChange={(e) => handleInputChange('diagnosticPrincipal', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label>Cod ICD (opțional)</label>
+                                                    <input
+                                                        type="text"
+
+                                                        value={formData.codICD}
+                                                        onChange={(e) => handleInputChange('codICD', e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <h2 className="section-title" style={{ marginTop: '40px' }}>Diagnostice Secundare (max. 7)</h2>
+                                            {formData.diagnosticeSecundare.map((diagnostic, index) => (
+                                                <div key={index} className="repeatable-section">
+                                                    <div className="form-group">
+                                                        <label>Diagnostic Secundar {index + 1}</label>
+                                                        <input
+                                                            type="text"
+
+                                                            value={diagnostic}
+                                                            onChange={(e) => updateDiagnosticSecundar(index, e.target.value)}
+                                                        />
+                                                    </div>
+                                                    {index > 0 && (
+                                                        <button className="btn-remove" onClick={() => removeDiagnosticSecundar(index)}>
+                                                            Șterge Diagnostic
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            {formData.diagnosticeSecundare.length < 7 && (
+                                                <button className="btn-add" onClick={addDiagnosticSecundar}>
+                                                    + Adaugă Diagnostic Secundar
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {currentStep === 4 && (
+                                        <div className="form-section">
+                                            <h2 className="section-title">Investigatii</h2>
+
+                                            <h3 className="subsection-title">1. Explorări funcţionale</h3>
+                                            <div style={{ marginBottom: '20px' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                    <thead>
+                                                        <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
+                                                            <th style={{ padding: '8px', textAlign: 'left', maxWidth: '60%' }}>Denumirea</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '25%' }}>Codul</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '15%' }}>Nr.</th>
+                                                            <th style={{ padding: '8px', width: '40px' }}></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {formData.explorariFunctionale.map((item, index) => (
+                                                            <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.denumire}
+                                                                        onChange={(e) => updateExplorariFunctionale(index, 'denumire', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.cod}
+                                                                        onChange={(e) => updateExplorariFunctionale(index, 'cod', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.numar}
+                                                                        onChange={(e) => updateExplorariFunctionale(index, 'numar', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                                                    {index > 0 && (
+                                                                        <button className="btn-remove" onClick={() => removeExplorariFunctionale(index)} style={{ padding: '4px 8px', fontSize: '12px' }}>
+                                                                            Șterge
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                {formData.explorariFunctionale.length < 7 && (
+                                                    <button className="btn-add" onClick={addExplorariFunctionale} style={{ marginTop: '10px' }}>
+                                                        + Adaugă Explorare Funcţională
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <h3 className="subsection-title">2. Investigaţii radiologice</h3>
+                                            <div style={{ marginBottom: '20px' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                    <thead>
+                                                        <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
+                                                            <th style={{ padding: '8px', textAlign: 'left', maxWidth: '60%' }}>Denumirea</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '25%' }}>Codul</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '15%' }}>Nr.</th>
+                                                            <th style={{ padding: '8px', width: '40px' }}></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {formData.investigatiiRadiologice.map((item, index) => (
+                                                            <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.denumire}
+                                                                        onChange={(e) => updateInvestigatiiRadiologice(index, 'denumire', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.cod}
+                                                                        onChange={(e) => updateInvestigatiiRadiologice(index, 'cod', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.numar}
+                                                                        onChange={(e) => updateInvestigatiiRadiologice(index, 'numar', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                                                    {index > 0 && (
+                                                                        <button className="btn-remove" onClick={() => removeInvestigatiiRadiologice(index)} style={{ padding: '4px 8px', fontSize: '12px' }}>
+                                                                            Șterge
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                {formData.investigatiiRadiologice.length < 7 && (
+                                                    <button className="btn-add" onClick={addInvestigatiiRadiologice} style={{ marginTop: '10px' }}>
+                                                        + Adaugă Investigaţie Radiologică
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <h3 className="subsection-title">3. Alte proceduri terapeutice</h3>
+                                            <div style={{ marginBottom: '20px' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                    <thead>
+                                                        <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
+                                                            <th style={{ padding: '8px', textAlign: 'left', maxWidth: '60%' }}>Denumirea</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '25%' }}>Codul</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '15%' }}>Nr.</th>
+                                                            <th style={{ padding: '8px', width: '40px' }}></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {formData.alteProceduri.map((item, index) => (
+                                                            <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.denumire}
+                                                                        onChange={(e) => updateAlteProceduri(index, 'denumire', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.cod}
+                                                                        onChange={(e) => updateAlteProceduri(index, 'cod', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.numar}
+                                                                        onChange={(e) => updateAlteProceduri(index, 'numar', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                                                    {index > 0 && (
+                                                                        <button className="btn-remove" onClick={() => removeAlteProceduri(index)} style={{ padding: '4px 8px', fontSize: '12px' }}>
+                                                                            Șterge
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                {formData.alteProceduri.length < 7 && (
+                                                    <button className="btn-add" onClick={addAlteProceduri} style={{ marginTop: '10px' }}>
+                                                        + Adaugă Procedură Terapeutică
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <h3 className="subsection-title">4. Analize de laborator</h3>
+                                            <div style={{ marginBottom: '20px' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                    <thead>
+                                                        <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
+                                                            <th style={{ padding: '8px', textAlign: 'left', maxWidth: '60%' }}>Denumirea</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '25%' }}>Codul</th>
+                                                            <th style={{ padding: '8px', textAlign: 'left', width: '15%' }}>Nr.</th>
+                                                            <th style={{ padding: '8px', width: '40px' }}></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {formData.analizeLaborator.map((item, index) => (
+                                                            <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.denumire}
+                                                                        onChange={(e) => updateAnalizeLaborator(index, 'denumire', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.cod}
+                                                                        onChange={(e) => updateAnalizeLaborator(index, 'cod', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <input
+                                                                        type="text"
+
+                                                                        value={item.numar}
+                                                                        onChange={(e) => updateAnalizeLaborator(index, 'numar', e.target.value)}
+                                                                        style={{ width: '100%', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                                                                    />
+                                                                </td>
+                                                                <td style={{ padding: '8px', textAlign: 'center' }}>
+                                                                    {index > 0 && (
+                                                                        <button className="btn-remove" onClick={() => removeAnalizeLaborator(index)} style={{ padding: '4px 8px', fontSize: '12px' }}>
+                                                                            Șterge
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                {formData.analizeLaborator.length < 7 && (
+                                                    <button className="btn-add" onClick={addAnalizeLaborator} style={{ marginTop: '10px' }}>
+                                                        + Adaugă Analiză de Laborator
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <h2 className="section-title" style={{ marginTop: '40px' }}>Epicriza</h2>
+                                            <div className="form-group">
+                                                <label>Descriere</label>
+                                                <textarea
+
+                                                    value={formData.epicriza}
+                                                    onChange={(e) => handleInputChange('epicriza', e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {currentStep === 5 && (
+                                        <div className="success-screen">
+                                            <div className="success-icon">👍</div>
+                                            <h2 className="success-title">Inregistrare facuta cu succes!</h2>
+
+                                            <button
+                                                className="btn-primary"
+                                                style={{ marginTop: '32px' }}
+                                                onClick={() => { resetForm(); setCurrentView('list'); }}
+                                            >
+                                                Înapoi la Listă
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {currentStep < 5 && (
+                                    <div className="wizard-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        {currentStep > 0 ? (
+                                            <button className="btn-secondary" onClick={handleBack}>
+                                                Înapoi
+                                            </button>
+                                        ) : <div></div>}
+                                        <button className="btn-primary" onClick={handleNext}>
+                                            {currentStep === 4 ? 'Trimite' : 'Următorul'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+
+</html>
